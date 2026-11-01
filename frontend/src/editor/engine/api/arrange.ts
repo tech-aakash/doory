@@ -11,6 +11,7 @@ import { asDory, ensureId, isLocked } from '../objects/dory'
 import { bakeInPlace } from '../objects/bake'
 import { applyMask } from '../objects/masks'
 import { kindOfLive } from '../objects/kinds'
+import { isImageGrid, normalizeImageGridTransform } from '../objects/imageGrid'
 import { anchorFrames, carriedPictures, clampSlotImage, coverSlotTransform, followFrames, hasSlot, mirrorSlot, shiftSlot } from '../objects/slot'
 import { getExtraProps } from '../serialization'
 import { coverFrame } from './insert'
@@ -490,6 +491,7 @@ export class ArrangeApi {
         // Stretching would distort the parts of a group or a drawing, so it is scaled by one factor, like a picture.
         const k = Math.max(pageW / w0, pageH / h0)
         active.set({ scaleX: active.scaleX * k, scaleY: active.scaleY * k })
+        if (active instanceof Group && isImageGrid(active)) normalizeImageGridTransform(active)
       } else {
         active.set({ scaleX: (active.scaleX * pageW) / w0, scaleY: (active.scaleY * pageH) / h0 })
         // A baked shape has a new width and height, so its frame (a placeholder's crop shape) is rebuilt to match.
@@ -522,7 +524,8 @@ export class ArrangeApi {
     const center = active.getCenterPoint()
     this.carrying(active, () => {
       active.set({ scaleX: active.scaleX * sxk, scaleY: active.scaleY * syk })
-      if (!(active instanceof ActiveSelection)) bakeInPlace(active)
+      if (active instanceof Group && isImageGrid(active)) normalizeImageGridTransform(active)
+      else if (!(active instanceof ActiveSelection)) bakeInPlace(active)
       active.setPositionByOrigin(new Point(center.x, center.y), 'center', 'center')
     })
     clampSlotImage(active)
