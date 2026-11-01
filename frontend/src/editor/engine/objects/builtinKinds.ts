@@ -17,6 +17,7 @@ import { qrDataUrl } from './qr'
 import { t } from '../../strings'
 import { CLIP_PROPS, isClip } from '../../clips/model'
 import { readImageGridSpec } from '../../grids/model'
+import { reconcileImageGridChildren } from './imageGrid'
 
 
 const TEXT_TYPES = new Set(['textbox', 'itext', 'text'])
@@ -74,7 +75,7 @@ export function registerBuiltinKinds(): void {
       const spec = readImageGridSpec(asDory(obj).imageGrid)
       if (!spec) return
       asDory(obj).imageGrid = spec
-      for (const child of obj.getObjects()) child.set({ selectable: false, evented: false })
+      reconcileImageGridChildren(obj, spec)
     },
   })
 

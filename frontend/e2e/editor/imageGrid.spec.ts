@@ -141,6 +141,7 @@ test.describe('[engine] image grids', () => {
     expect(filled?.scaleX).toBeCloseTo(filled?.scaleY ?? 0, 5)
 
     await openTool(page, 'image')
+    await page.getByTestId('image-tab-uploads').click()
     const upload = page.waitForEvent('filechooser')
     await page.getByTestId('upload-zone').click()
     await (await upload).setFiles({ name: 'blue.png', mimeType: 'image/png', buffer: pngBuffer(160, 240, [37, 99, 235]) })

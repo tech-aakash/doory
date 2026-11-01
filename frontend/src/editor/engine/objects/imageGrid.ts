@@ -136,6 +136,51 @@ export function reflowImageGrid(group: Group, spec: ImageGridSpec, width = group
   group.setCoords()
 }
 
+/**
+ * Restores the one-child-per-cell invariant after document or collaboration hydration. The semantic
+ * grid metadata is authoritative; stale, duplicate or unsupported children are replaced with empty cells.
+ */
+export function reconcileImageGridChildren(group: Group, spec: ImageGridSpec): void {
+  const center = group.getCenterPoint()
+  const width = Math.max(MIN_IMAGE_GRID_SIZE, group.width)
+  const height = Math.max(MIN_IMAGE_GRID_SIZE, group.height)
+  const frames = gridCellFrames(spec, width, height)
+  const wanted = new Set(spec.cells.map((cell) => cell.gridCellId))
+  const retained = new Set<string>()
+  const reusableIds: (string | undefined)[] = []
+
+  for (const child of [...group.getObjects()]) {
+    const data = asDory(child)
+    const cellId = data.gridCellId
+    const supported = child instanceof FabricImage || child instanceof Rect
+    if (!supported || !cellId || !wanted.has(cellId) || retained.has(cellId)) {
+      reusableIds.push(data.id)
+      group.remove(child)
+      child.dispose()
+      continue
+    }
+    retained.add(cellId)
+  }
+
+  const usedIds = new Set(group.getObjects().map((child) => asDory(child).id).filter((id): id is string => !!id))
+  for (const cell of spec.cells) {
+    if (retained.has(cell.gridCellId)) continue
+    const frame = gridCellFrame(frames, cell.gridCellId)
+    if (!frame) continue
+    let reusableId = reusableIds.shift()
+    while (reusableId && usedIds.has(reusableId)) reusableId = reusableIds.shift()
+    const empty = createEmptyGridCell(frame, width, height, reusableId)
+    usedIds.add(asDory(empty).id!)
+    group.add(empty)
+  }
+
+  reflowImageGrid(group, spec, width, height)
+  normalizeImageGridTransform(group)
+  group.setPositionByOrigin(center, 'center', 'center')
+  group.setCoords()
+  for (const child of group.getObjects()) child.set({ selectable: false, evented: false })
+}
+
 /** Bakes a side/corner scale into cell geometry so photographs always keep a uniform scale. */
 export function normalizeImageGridTransform(group: Group): boolean {
   const spec = imageGridSpecOf(group)

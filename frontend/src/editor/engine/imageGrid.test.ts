@@ -1,4 +1,4 @@
-import { FabricImage, Group, Rect } from 'fabric'
+import { FabricImage, Group, Point, Rect } from 'fabric'
 import { createBlankDocument } from '@/lib/document'
 import type { AssetRef } from '@/types/adapter'
 import { createMemoryAdapter } from '../dev/memoryAdapter'
@@ -7,6 +7,8 @@ import { EditorEngine } from './editor'
 import { asDory } from './objects/dory'
 import { gridCellObject, imageGridSpecOf, isEmptyGridCell } from './objects/imageGrid'
 import { kindOfLive } from './objects/kinds'
+import { createImageGridSpec } from '../grids/model'
+import { t } from '../strings'
 
 interface TestEditor {
   engine: EditorEngine
@@ -101,6 +103,54 @@ describe('image grids', () => {
     expect(duplicateIds).toHaveLength(originalIds.length)
     expect(duplicateIds.every((id) => !!id && !originalIds.includes(id))).toBe(true)
     expect(imageGridSpecOf(duplicate)).toEqual(imageGridSpecOf(restored))
+  })
+
+  it('repairs mismatched grid children and geometry when a merged document is hydrated', async () => {
+    const first = await setup()
+    await first.engine.imageGrids.insert('two-columns')
+    const original = selectedGrid(first)
+    await first.engine.imageGrids.fillCellWith(first.pageId, asDory(original).id!, 'cell-1', await asset(first.engine, 'kept.png'))
+    const originalCenter = original.getCenterPoint()
+    const originalPosition = { left: original.left, top: original.top }
+    const saved = structuredClone(first.engine.getDocument())
+    const gridDoc = saved.pages[0].objects[0]
+    const children = gridDoc.objects as Array<Record<string, unknown>>
+    const firstCell = structuredClone(children[0])
+    const secondCell = structuredClone(children[1])
+    firstCell.src = 'https://example.test/kept.png'
+    firstCell.docSrc = firstCell.src
+    delete firstCell.assetId
+    gridDoc.imageGrid = createImageGridSpec('two-rows', 20)
+    gridDoc.scaleX = 1.35
+    gridDoc.scaleY = 0.7
+    gridDoc.objects = [
+      { ...firstCell, left: -900, top: -700, width: 3, height: 4, gridCellId: 'cell-1' },
+      { ...secondCell, id: 'duplicate-cell', gridCellId: 'cell-1' },
+      { ...secondCell, id: 'stale-cell', gridCellId: 'removed-cell' },
+    ]
+
+    const reopened = await setup(saved)
+    const grid = reopened.view.canvas.getObjects()[0] as Group
+    const cellOne = gridCellObject(grid, 'cell-1') as FabricImage
+    const cellTwo = gridCellObject(grid, 'cell-2') as Rect
+    expect(kindOfLive(grid)).toBe('image-grid')
+    expect(grid.getObjects()).toHaveLength(2)
+    expect(grid.getObjects().map((child) => asDory(child).gridCellId).sort()).toEqual(['cell-1', 'cell-2'])
+    expect(new Set(grid.getObjects().map((child) => asDory(child).id)).size).toBe(2)
+    expect(cellOne).toBeInstanceOf(FabricImage)
+    expect(grid.getCenterPoint().x).toBeCloseTo(originalCenter.x)
+    expect(grid.getCenterPoint().y).toBeCloseTo(originalCenter.y)
+    expect(grid.left).toBeCloseTo(originalPosition.left)
+    expect(grid.top).toBeCloseTo(originalPosition.top)
+    expect(grid.scaleX).toBe(1)
+    expect(grid.scaleY).toBe(1)
+    expect(cellOne.scaleX).toBeCloseTo(cellOne.scaleY)
+    expect(cellOne.getScaledWidth()).toBeCloseTo(grid.width)
+    expect(cellTwo.width).toBeCloseTo(grid.width)
+    expect(cellOne.getScaledHeight()).toBeCloseTo((grid.height - 20) / 2)
+    expect(cellTwo.height).toBeCloseTo((grid.height - 20) / 2)
+    expect(cellOne.selectable).toBe(false)
+    expect(cellTwo.evented).toBe(false)
   })
 
   it('fills and replaces a cell while retaining its stable cell identity', async () => {
@@ -308,6 +358,62 @@ describe('image grids', () => {
     editor.engine.imageGrids.consumeCanvasImage(editor.pageId, sourceId, gridId, 'cell-1', frame)
     expect(editor.view.getById(sourceId)).toBe(source)
     expect(isEmptyGridCell(gridCellObject(grid, 'cell-1'))).toBe(true)
+  })
+
+  it('keeps animated canvas images outside grids without adding a history step', async () => {
+    const editor = await setup()
+    await editor.engine.imageGrids.insert('two-columns')
+    const grid = selectedGrid(editor)
+    const gridId = asDory(grid).id!
+    const source = await insertPhoto(editor, 'animated.png', { x: 180, y: 150 })
+    const sourceId = asDory(source).id!
+    editor.engine.animation.setPreset('enter', 'fade', [sourceId])
+    const before = structuredClone(editor.engine.getDocument())
+    const toast = vi.spyOn(editor.engine, 'toast')
+    const center = source.getCenterPoint()
+    const frame = {
+      center: { x: center.x, y: center.y },
+      width: source.getScaledWidth(),
+      height: source.getScaledHeight(),
+      angle: source.angle || 0,
+      flipX: source.flipX,
+      flipY: source.flipY,
+    }
+
+    source.set({
+      scaleX: source.scaleX * 0.6,
+      scaleY: source.scaleY * 1.4,
+      angle: 47,
+      flipX: !frame.flipX,
+      flipY: !frame.flipY,
+    })
+    source.setPositionByOrigin(new Point(center.x + 240, center.y + 160), 'center', 'center')
+    source.setCoords()
+    editor.engine.refreshSelection()
+
+    editor.engine.imageGrids.consumeCanvasImage(editor.pageId, sourceId, gridId, 'cell-1', frame)
+
+    expect(editor.engine.getDocument()).toEqual(before)
+    expect(editor.view.getById(sourceId)).toBe(source)
+    expect(source.getCenterPoint().x).toBeCloseTo(frame.center.x)
+    expect(source.getCenterPoint().y).toBeCloseTo(frame.center.y)
+    expect(source.getScaledWidth()).toBeCloseTo(frame.width)
+    expect(source.getScaledHeight()).toBeCloseTo(frame.height)
+    expect(source.angle).toBe(frame.angle)
+    expect(source.flipX).toBe(frame.flipX)
+    expect(source.flipY).toBe(frame.flipY)
+    expect(editor.engine.state.selection.bounds?.x).toBeCloseTo(frame.center.x - frame.width / 2)
+    expect(editor.engine.state.selection.bounds?.y).toBeCloseTo(frame.center.y - frame.height / 2)
+    expect(editor.engine.state.selection.bounds?.width).toBeCloseTo(frame.width)
+    expect(editor.engine.state.selection.bounds?.height).toBeCloseTo(frame.height)
+    expect(editor.engine.state.selection.bounds?.angle).toBe(frame.angle)
+    expect(isEmptyGridCell(gridCellObject(grid, 'cell-1'))).toBe(true)
+    expect(toast).toHaveBeenCalledWith(t.imageGrid.animatedImageDisabled)
+
+    await editor.engine.undo()
+    const restoredSource = editor.view.getById(sourceId)
+    expect(restoredSource).toBeInstanceOf(FabricImage)
+    expect(asDory(restoredSource!).animation).toBeUndefined()
   })
 
   it('leaves grids unchanged when the editor is read-only', async () => {

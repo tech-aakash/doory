@@ -747,7 +747,7 @@ export class PageCanvas {
           let changed = false
           for (const id of ids) {
             const o = this.getById(id)
-            if (o && bakeInPlace(o)) changed = true
+            if (o && (isImageGrid(o) ? normalizeImageGridTransform(o) : bakeInPlace(o))) changed = true
           }
           if (changed) {
             const objs = ids.map((id) => this.getById(id)).filter((o): o is FabricObject => !!o)

@@ -11,7 +11,7 @@ import { asDory, ensureId, isLocked } from '../objects/dory'
 import { bakeInPlace } from '../objects/bake'
 import { applyMask } from '../objects/masks'
 import { kindOfLive } from '../objects/kinds'
-import { isImageGrid, normalizeImageGridTransform } from '../objects/imageGrid'
+import { imageGridSpecOf, isImageGrid, normalizeImageGridTransform } from '../objects/imageGrid'
 import { anchorFrames, carriedPictures, clampSlotImage, coverSlotTransform, followFrames, hasSlot, mirrorSlot, shiftSlot } from '../objects/slot'
 import { getExtraProps } from '../serialization'
 import { coverFrame } from './insert'
@@ -60,6 +60,12 @@ export function findLive(objects: readonly FabricObject[], id: string): FabricOb
     }
   }
   return undefined
+}
+
+/** True when an object is, or contains, a semantic image grid. */
+function containsImageGrid(obj: FabricObject): boolean {
+  if (isImageGrid(obj)) return true
+  return obj instanceof Group && obj.getObjects().some((child) => containsImageGrid(child))
 }
 
 export class ArrangeApi {
@@ -149,7 +155,9 @@ export class ArrangeApi {
     const view = this.view
     if (!view) return
     const objs = view.selectedObjects()
-    if (objs.length < 2) return
+    // Grid cells are addressed through their top-level grid. A generic wrapper would make those operations unreachable,
+    // including when an imported legacy group already contains a grid.
+    if (objs.length < 2 || objs.some((obj) => containsImageGrid(obj))) return
     const canvas = view.canvas
     const order = canvas.getObjects()
     const sorted = [...objs].sort((a, b) => order.indexOf(a) - order.indexOf(b))
@@ -171,6 +179,7 @@ export class ArrangeApi {
     if (!view) return
     const target = view.canvas.getActiveObject()
     if (!(target instanceof Group) || target instanceof ActiveSelection) return
+    if (imageGridSpecOf(target)) return
     const canvas = view.canvas
     const index = canvas.getObjects().indexOf(target)
     canvas.discardActiveObject()
@@ -532,7 +541,14 @@ export class ArrangeApi {
     active.setCoords()
     view.canvas.requestRenderAll()
     // A stretched selection is flattened; its pictures are made to cover their (stretched) frames again.
-    if (active instanceof ActiveSelection) this.withFlat((objs) => objs.forEach(clampSlotImage))
+    if (active instanceof ActiveSelection) {
+      this.withFlat((objs) => {
+        for (const obj of objs) {
+          if (isImageGrid(obj)) normalizeImageGridTransform(obj)
+          clampSlotImage(obj)
+        }
+      })
+    }
     this.done(t.history.resize, 'size')
   }
 

@@ -193,6 +193,7 @@ export const t = {
     gap: 'Grid gap',
     gapValue: (value: number) => `${value} px gap`,
     fewerCellsDisabled: 'Remove images from the extra cells before choosing this layout.',
+    animatedImageDisabled: 'Remove the animation before adding this image to a grid.',
     cell: (position: number) => `Grid cell ${position}`,
     addImageToCell: (position: number) => `Add an image to grid cell ${position}`,
     replaceImageInCell: (position: number) => `Replace the image in grid cell ${position}`,

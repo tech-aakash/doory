@@ -59,6 +59,17 @@ function keepGridPosition(group: Group, mutate: () => void): void {
   group.set('dirty', true)
 }
 
+function restoreCanvasImageFrame(image: FabricImage, frame: CanvasImageFrame): void {
+  const width = image.getScaledWidth()
+  const height = image.getScaledHeight()
+  const scaleX = width > 0 ? image.scaleX * (frame.width / width) : frame.width / Math.max(image.width, 1)
+  const scaleY = height > 0 ? image.scaleY * (frame.height / height) : frame.height / Math.max(image.height, 1)
+
+  image.set({ scaleX, scaleY, angle: frame.angle, flipX: frame.flipX, flipY: frame.flipY })
+  image.setPositionByOrigin(new Point(frame.center.x, frame.center.y), 'center', 'center')
+  image.setCoords()
+}
+
 export class ImageGridApi {
   constructor(private readonly engine: EditorEngine) {}
 
@@ -256,6 +267,13 @@ export class ImageGridApi {
       return
     const canvas = ctx.view.canvas
     if (!canvas.getObjects().includes(source) || source.group) return
+    if (sourceData.animation !== undefined) {
+      restoreCanvasImageFrame(source, sourceFrame)
+      canvas.requestRenderAll()
+      this.engine.refreshSelection()
+      this.engine.toast(t.imageGrid.animatedImageDisabled)
+      return
+    }
     const sourceIndex = canvas.getObjects().indexOf(source)
     const targetIndex = ctx.group.getObjects().indexOf(target)
     const gridData = sourceData
