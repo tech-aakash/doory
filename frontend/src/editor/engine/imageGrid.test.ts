@@ -125,6 +125,27 @@ describe('image grids', () => {
     expect(grid.getObjects()).toHaveLength(2)
   })
 
+  it('hit-tests the topmost unlocked visible cell for an image dragged from the asset library', async () => {
+    const editor = await setup()
+    await editor.engine.imageGrids.insert('two-columns')
+    const lowerGrid = selectedGrid(editor)
+    await editor.engine.imageGrids.insert('two-columns')
+    const upperGrid = selectedGrid(editor)
+    const point = { x: upperGrid.left - upperGrid.width / 4, y: upperGrid.top }
+
+    expect(editor.view.setImageAssetDrop(point)).toEqual({ gridId: asDory(upperGrid).id, gridCellId: 'cell-1' })
+    expect(editor.view.setImageAssetDrop(null)).toBeNull()
+
+    upperGrid.visible = false
+    expect(editor.view.setImageAssetDrop(point)).toEqual({ gridId: asDory(lowerGrid).id, gridCellId: 'cell-1' })
+    asDory(lowerGrid).locked = true
+    expect(editor.view.setImageAssetDrop(point)).toBeNull()
+
+    asDory(lowerGrid).locked = false
+    editor.engine.setLiveReadOnly(true)
+    expect(editor.view.setImageAssetDrop(point)).toBeNull()
+  })
+
   it('changes layouts when removed cells are empty, refuses image loss and applies gaps', async () => {
     const editor = await setup()
     await editor.engine.imageGrids.insert('two-columns')

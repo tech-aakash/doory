@@ -122,7 +122,17 @@ interface GridCellPress {
 interface GridImageDrag {
   sourceId: string
   sourceFrame: CanvasImageFrame
-  target: { group: Group; gridCellId: string } | null
+  target: GridDropTarget | null
+}
+
+interface GridDropTarget {
+  group: Group
+  gridCellId: string
+}
+
+export interface ImageGridDropTarget {
+  gridId: string
+  gridCellId: string
 }
 
 export function objectRect(o: FabricObject): Rect {
@@ -162,6 +172,8 @@ export class PageCanvas {
   private editingGrid: Group | null = null
   private gridCellPress: GridCellPress | null = null
   private gridImageDrag: GridImageDrag | null = null
+  /** A library thumbnail being dragged over a grid cell from outside Fabric's canvas events. */
+  private imageAssetDrop: GridDropTarget | null = null
 
   constructor(
     private readonly host: PageCanvasHost,
@@ -236,6 +248,17 @@ export class PageCanvas {
     this.drawOverlay()
   }
 
+  /** Updates the grid cell highlighted for an image dragged from the asset library. */
+  setImageAssetDrop(point: { x: number; y: number } | null): ImageGridDropTarget | null {
+    const next = point && !this.host.readOnly ? this.imageGridDropAt(point) : null
+    const changed = this.imageAssetDrop?.group !== next?.group || this.imageAssetDrop?.gridCellId !== next?.gridCellId
+    this.imageAssetDrop = next
+    if (changed) this.drawOverlay()
+    if (!next) return null
+    const gridId = asDory(next.group).id
+    return gridId ? { gridId, gridCellId: next.gridCellId } : null
+  }
+
   setTheme(theme: CanvasTheme): void {
     applyThemeToCanvas(this.canvas, theme)
     this.drawOverlay()
@@ -248,6 +271,7 @@ export class PageCanvas {
       o.evented = !readOnly
     }
     if (readOnly) this.canvas.discardActiveObject()
+    if (readOnly) this.setImageAssetDrop(null)
     this.canvas.skipTargetFind = readOnly
     this.canvas.requestRenderAll()
   }
@@ -473,11 +497,12 @@ export class PageCanvas {
       this.gridCellPress = null
     }
     const drag = this.gridImageDrag
-    if (!drag) return
-    const target = drag.target
-    if (!this.getById(drag.sourceId) || (target && (!objects.includes(target.group) || !gridCellObject(target.group, target.gridCellId)))) {
+    const target = drag?.target
+    if (drag && (!this.getById(drag.sourceId) || (target && (!objects.includes(target.group) || !gridCellObject(target.group, target.gridCellId))))) {
       this.gridImageDrag = null
     }
+    const asset = this.imageAssetDrop
+    if (asset && (!objects.includes(asset.group) || !gridCellObject(asset.group, asset.gridCellId))) this.imageAssetDrop = null
   }
 
   /** The objects whose text somebody else is editing: they stay selectable and movable but cannot enter text editing. */
@@ -996,20 +1021,21 @@ export class PageCanvas {
     const drag = this.gridImageDrag
     if (!drag || !canDropIntoImageGrid(target)) return
     const point = this.canvas.getScenePoint(event)
-    let next: GridImageDrag['target'] = null
+    const next = this.imageGridDropAt(point)
+    const changed = drag.target?.group !== next?.group || drag.target?.gridCellId !== next?.gridCellId
+    drag.target = next
+    if (changed) this.drawOverlay()
+  }
+
+  private imageGridDropAt(point: { x: number; y: number }): GridDropTarget | null {
     const objects = this.canvas.getObjects()
     for (let index = objects.length - 1; index >= 0; index -= 1) {
       const candidate = objects[index]
       if (!isImageGrid(candidate) || candidate.visible === false || asDory(candidate).locked) continue
       const hit = imageGridCellAtPoint(candidate, point)
-      if (hit) {
-        next = { group: candidate, gridCellId: hit.gridCellId }
-        break
-      }
+      if (hit) return { group: candidate, gridCellId: hit.gridCellId }
     }
-    const changed = drag.target?.group !== next?.group || drag.target?.gridCellId !== next?.gridCellId
-    drag.target = next
-    if (changed) this.drawOverlay()
+    return null
   }
 
   private afterTextInput(t: IText): void {
@@ -1351,7 +1377,7 @@ export class PageCanvas {
       const spec = imageGridSpecOf(object)
       if (!spec) continue
       const editing = this.editingGrid === object
-      const dragTarget = this.gridImageDrag?.target
+      const dragTarget = this.imageAssetDrop ?? this.gridImageDrag?.target
       const reorderTarget = this.gridCellPress?.dragging ? this.gridCellPress.overCellId : null
       for (const cell of spec.cells) {
         const child = gridCellObject(object, cell.gridCellId)
@@ -1413,6 +1439,7 @@ export class PageCanvas {
     this.disposed = true
     this.gridCellPress = null
     this.gridImageDrag = null
+    this.imageAssetDrop = null
     for (const off of this.cleanups) off()
     this.cleanups = []
     this.dragCache.end()

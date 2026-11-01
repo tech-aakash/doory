@@ -20,7 +20,7 @@ interface GridObject {
   scaleX: number
   scaleY: number
   imageGrid: { layoutId: string; gap: number; cells: GridCell[] }
-  objects: Array<{ id: string; type: string; gridCellId: string; scaleX?: number; scaleY?: number }>
+  objects: Array<{ id: string; type: string; gridCellId: string; name?: string; scaleX?: number; scaleY?: number }>
 }
 
 async function insertGrid(page: Page, layoutId: string): Promise<GridObject> {
@@ -46,6 +46,25 @@ async function fillFromToolbar(page: Page, position: number, name: string, rgb: 
   const chooser = page.waitForEvent('filechooser')
   await page.getByRole('button', { name: `Replace the image in grid cell ${position}` }).click()
   await (await chooser).setFiles({ name, mimeType: 'image/png', buffer: pngBuffer(240, 160, rgb) })
+}
+
+async function uploadPhoto(page: Page, name: string, rgb: readonly [number, number, number]): Promise<void> {
+  const chooser = page.waitForEvent('filechooser')
+  await page.getByTestId('upload-zone').click()
+  await (await chooser).setFiles({ name, mimeType: 'image/png', buffer: pngBuffer(240, 160, rgb) })
+  await expect(page.getByTestId('uploaded-thumb').filter({ hasText: name })).toBeVisible()
+}
+
+async function dragUploadedToCell(page: Page, name: string, grid: GridObject, gridCellId: string): Promise<void> {
+  const artboard = page.locator('[data-artboard]')
+  const box = await artboard.boundingBox()
+  if (!box) throw new Error('artboard not found')
+  const doc = await getDoc(page)
+  const zoom = box.width / doc.width
+  const point = cellCentre(grid, gridCellId)
+  await page.getByTestId('uploaded-thumb').filter({ hasText: name }).dragTo(artboard, {
+    targetPosition: { x: point.x * zoom, y: point.y * zoom },
+  })
 }
 
 test.describe('[engine] image grids', () => {
@@ -138,5 +157,27 @@ test.describe('[engine] image grids', () => {
     await waitForObjectCount(page, 2)
     await page.keyboard.press('Control+Shift+z')
     await waitForObjectCount(page, 1)
+  })
+
+  test('drags uploaded images directly into empty and occupied grid cells', async ({ page }) => {
+    await openEditor(page, 'doc=blank')
+    const grid = await insertGrid(page, 'two-columns')
+    await openTool(page, 'image')
+    await page.getByTestId('image-tab-uploads').click()
+
+    await uploadPhoto(page, 'blue.png', [37, 99, 235])
+    await dragUploadedToCell(page, 'blue.png', grid, 'cell-1')
+    await expect.poll(async () => ((await pageObjects(page))[0] as unknown as GridObject).objects.find((cell) => cell.gridCellId === 'cell-1')?.name).toBe('blue.png')
+    await waitForObjectCount(page, 1)
+
+    await uploadPhoto(page, 'green.png', [22, 163, 74])
+    await dragUploadedToCell(page, 'green.png', grid, 'cell-1')
+    await expect.poll(async () => ((await pageObjects(page))[0] as unknown as GridObject).objects.find((cell) => cell.gridCellId === 'cell-1')?.name).toBe('green.png')
+    await waitForObjectCount(page, 1)
+
+    await page.keyboard.press('Control+z')
+    await expect.poll(async () => ((await pageObjects(page))[0] as unknown as GridObject).objects.find((cell) => cell.gridCellId === 'cell-1')?.name).toBe('blue.png')
+    await page.keyboard.press('Control+Shift+z')
+    await expect.poll(async () => ((await pageObjects(page))[0] as unknown as GridObject).objects.find((cell) => cell.gridCellId === 'cell-1')?.name).toBe('green.png')
   })
 })

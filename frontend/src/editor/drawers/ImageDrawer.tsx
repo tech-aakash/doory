@@ -13,6 +13,7 @@ import { loadable } from '../ui/loadable'
 import { Skeleton } from '../ui/Skeleton'
 import ed from '../chrome/ed.module.css'
 import styles from './Drawers.module.css'
+import { beginImageAssetDrag, endImageAssetDrag } from './imageAssetDrag'
 import { uploadToLibrary } from './uploads'
 
 function toRef(a: Asset): AssetRef {
@@ -21,9 +22,20 @@ function toRef(a: Asset): AssetRef {
 
 function Thumb({ asset, onPlace, onDelete }: { asset: AssetRef; onPlace: () => void; onDelete?: () => void }) {
   const url = useResolvedSrc(asset.thumbUrl || asset.url)
+  const draggable = asset.kind === 'image' || asset.kind === 'svg'
   return (
     <div className={styles.thumbRow}>
-      <button type="button" className={ed.uploadedThumb} data-testid="uploaded-thumb" onClick={onPlace}>
+      <button
+        type="button"
+        className={ed.uploadedThumb}
+        data-testid="uploaded-thumb"
+        draggable={draggable}
+        onClick={onPlace}
+        onDragStart={(event) => {
+          if (!beginImageAssetDrag(event.dataTransfer, asset)) event.preventDefault()
+        }}
+        onDragEnd={endImageAssetDrag}
+      >
         {url ? <img src={url} alt="" draggable={false} /> : <Skeleton width={40} height={40} radius={5} />}
         <span className={ed.uploadedName}>{asset.name}</span>
       </button>
